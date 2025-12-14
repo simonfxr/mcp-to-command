@@ -1,202 +1,38 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/mcp"
 )
-
-// MCP JSON-RPC types
-type JSONRPCRequest struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params,omitempty"`
-}
-
-type JSONRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int             `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *JSONRPCError   `json:"error,omitempty"`
-}
-
-type JSONRPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-// MCP Tool types
-type ToolsListResult struct {
-	Tools []Tool `json:"tools"`
-}
-
-type Tool struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	InputSchema InputSchema `json:"inputSchema"`
-}
-
-type InputSchema struct {
-	Type       string              `json:"type"`
-	Properties map[string]Property `json:"properties,omitempty"`
-	Required   []string            `json:"required,omitempty"`
-}
-
-type Property struct {
-	Type        string      `json:"type"`
-	Description string      `json:"description,omitempty"`
-	Default     interface{} `json:"default,omitempty"`
-}
-
-// MCP client that communicates via stdio
-type MCPClient struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	reqID  int
-}
-
-func NewMCPClient(command string, args []string) (*MCPClient, error) {
-	cmd := exec.Command(command, args...)
-	cmd.Stderr = os.Stderr
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get stdin pipe: %w", err)
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start MCP server: %w", err)
-	}
-
-	return &MCPClient{
-		cmd:    cmd,
-		stdin:  stdin,
-		stdout: bufio.NewReader(stdout),
-		reqID:  0,
-	}, nil
-}
-
-func (c *MCPClient) Close() error {
-	c.stdin.Close()
-	return c.cmd.Wait()
-}
-
-func (c *MCPClient) sendRequest(method string, params interface{}) (json.RawMessage, error) {
-	c.reqID++
-	req := JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      c.reqID,
-		Method:  method,
-		Params:  params,
-	}
-
-	data, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	if _, err := c.stdin.Write(append(data, '\n')); err != nil {
-		return nil, fmt.Errorf("failed to write request: %w", err)
-	}
-
-	// Read response line
-	line, err := c.stdout.ReadBytes('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var resp JSONRPCResponse
-	if err := json.Unmarshal(line, &resp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	if resp.Error != nil {
-		return nil, fmt.Errorf("MCP error %d: %s", resp.Error.Code, resp.Error.Message)
-	}
-
-	return resp.Result, nil
-}
-
-func (c *MCPClient) Initialize() error {
-	params := map[string]interface{}{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]interface{}{},
-		"clientInfo": map[string]string{
-			"name":    "mcp-to-command",
-			"version": "1.0.0",
-		},
-	}
-
-	_, err := c.sendRequest("initialize", params)
-	if err != nil {
-		return fmt.Errorf("initialize failed: %w", err)
-	}
-
-	// Send initialized notification (no ID for notifications)
-	notif := map[string]string{
-		"jsonrpc": "2.0",
-		"method":  "notifications/initialized",
-	}
-	data, _ := json.Marshal(notif)
-	c.stdin.Write(append(data, '\n'))
-
-	return nil
-}
-
-func (c *MCPClient) ListTools() ([]Tool, error) {
-	result, err := c.sendRequest("tools/list", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var toolsResult ToolsListResult
-	if err := json.Unmarshal(result, &toolsResult); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal tools: %w", err)
-	}
-
-	return toolsResult.Tools, nil
-}
-
-func (c *MCPClient) CallTool(name string, arguments map[string]interface{}) (json.RawMessage, error) {
-	params := map[string]interface{}{
-		"name":      name,
-		"arguments": arguments,
-	}
-
-	return c.sendRequest("tools/call", params)
-}
-
-// CLI help output
 
 func printUsage(progName string) {
 	fmt.Fprintf(os.Stderr, `Usage: %s <mcp-server-command> [server-args...] -- <tool-name> [--flag=value...]
+       %s <http(s)://mcp-server-url> -- <tool-name> [--flag=value...]
 
 Executes MCP server tools via command line.
 
 Examples:
+  # Local MCP server via stdio
   %s go-jenkins-mcp -url example.com -- jenkins_get_jobs
   %s go-jenkins-mcp -url example.com -- jenkins_get_job --name=my-job
-  %s go-jenkins-mcp -url example.com -- --help
+
+  # Remote MCP server via HTTP
+  %s https://mcp.example.com/api -- jenkins_get_jobs
 
 Use -- --help to list all available tools.
 Use -- <tool-name> --help to see help for a specific tool.
-`, progName, progName, progName, progName)
+`, progName, progName, progName, progName, progName)
 }
 
-func printToolsHelp(tools []Tool) {
+func printToolsHelp(tools []mcp.Tool) {
 	fmt.Println("Available tools:")
 	fmt.Println()
 
@@ -224,7 +60,7 @@ func printToolsHelp(tools []Tool) {
 	fmt.Println("Use <tool-name> --help for more information about a tool.")
 }
 
-func printToolHelp(tool Tool) {
+func printToolHelp(tool mcp.Tool) {
 	fmt.Printf("%s\n\n", tool.Name)
 	fmt.Printf("  %s\n\n", tool.Description)
 
@@ -256,11 +92,17 @@ func printToolHelp(tool Tool) {
 	fmt.Println("Flags:")
 
 	for _, name := range propNames {
-		prop := tool.InputSchema.Properties[name]
+		propVal, ok := tool.InputSchema.Properties[name].(map[string]any)
+		if !ok {
+			// Try as map[string]string just in case, though json usually gives any
+			continue
+		}
+
 		required := requiredSet[name]
 
 		flagName := fmt.Sprintf("--%s", name)
-		typeStr := prop.Type
+
+		typeStr, _ := propVal["type"].(string)
 		if typeStr == "" {
 			typeStr = "string"
 		}
@@ -271,13 +113,14 @@ func printToolHelp(tool Tool) {
 		}
 
 		defaultStr := ""
-		if prop.Default != nil {
-			defaultStr = fmt.Sprintf(" (default: %v)", prop.Default)
+		if def, ok := propVal["default"]; ok && def != nil {
+			defaultStr = fmt.Sprintf(" (default: %v)", def)
 		}
 
 		fmt.Printf("  %s <%s>%s%s\n", flagName, typeStr, reqStr, defaultStr)
-		if prop.Description != "" {
-			fmt.Printf("      %s\n", prop.Description)
+
+		if desc, ok := propVal["description"].(string); ok && desc != "" {
+			fmt.Printf("      %s\n", desc)
 		}
 		if typeStr == "object" {
 			fmt.Printf("      Example: %s='{\"key\":\"value\"}'\n", flagName)
@@ -290,15 +133,8 @@ func printToolHelp(tool Tool) {
 
 // Flag parsing
 
-func parseToolFlags(args []string, tool Tool) (map[string]interface{}, error) {
-	result := make(map[string]interface{})
-
-	// Apply defaults first
-	for name, prop := range tool.InputSchema.Properties {
-		if prop.Default != nil {
-			result[name] = prop.Default
-		}
-	}
+func parseToolFlags(args []string, tool mcp.Tool) (map[string]any, error) {
+	result := make(map[string]any)
 
 	// Parse flags
 	for _, arg := range args {
@@ -307,47 +143,133 @@ func parseToolFlags(args []string, tool Tool) (map[string]interface{}, error) {
 		}
 
 		arg = strings.TrimPrefix(arg, "--")
-		parts := strings.SplitN(arg, "=", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid flag format: --%s (expected --name=value)", arg)
+		var name, value string
+		var hasValue bool
+
+		if strings.Contains(arg, "=") {
+			parts := strings.SplitN(arg, "=", 2)
+			name = parts[0]
+			value = parts[1]
+			hasValue = true
+		} else {
+			name = arg
+			hasValue = false
 		}
 
-		name := parts[0]
-		value := parts[1]
+		propVal, exists := tool.InputSchema.Properties[name]
 
-		prop, exists := tool.InputSchema.Properties[name]
+		// Check for --no-flagname if flag not found
+		var isNegated bool
+		if !exists && strings.HasPrefix(name, "no-") {
+			candidate := strings.TrimPrefix(name, "no-")
+			if p, ok := tool.InputSchema.Properties[candidate]; ok {
+				name = candidate
+				propVal = p
+				exists = true
+				isNegated = true
+			}
+		}
+
 		if !exists {
 			return nil, fmt.Errorf("unknown flag: --%s", name)
 		}
 
-		// Convert value based on type
-		switch prop.Type {
-		case "integer":
-			intVal, err := strconv.ParseInt(value, 10, 64)
+		prop, ok := propVal.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("invalid schema for flag: --%s", name)
+		}
+
+		propType, _ := prop["type"].(string)
+
+		// Handle boolean shorthand (no value provided)
+		if !hasValue {
+			if propType == "boolean" {
+				if isNegated {
+					result[name] = false
+				} else {
+					result[name] = true
+				}
+				continue
+			} else {
+				return nil, fmt.Errorf("flag --%s requires a value", name)
+			}
+		}
+
+		if isNegated {
+			if propType != "boolean" {
+				return nil, fmt.Errorf("flag --no-%s is not valid for non-boolean type", name)
+			}
+			if hasValue {
+				return nil, fmt.Errorf("flag --no-%s takes no value", name)
+			}
+		}
+
+		// Helper to parse value based on type string
+		parseValue := func(typeStr string, valStr string) (any, error) {
+			switch typeStr {
+			case "integer":
+				return strconv.ParseInt(valStr, 10, 64)
+			case "number":
+				return strconv.ParseFloat(valStr, 64)
+			case "boolean":
+				return strconv.ParseBool(valStr)
+			case "object", "array":
+				var jsonVal any
+				if err := json.Unmarshal([]byte(valStr), &jsonVal); err != nil {
+					return nil, fmt.Errorf("requires valid JSON: %w", err)
+				}
+				return jsonVal, nil
+			default:
+				return valStr, nil
+			}
+		}
+
+		if propType == "array" {
+			// Initialize slice if first time seen
+			if result[name] == nil {
+				result[name] = []any{}
+			}
+
+			// Determine item type
+			itemType := "string" // default
+			if items, ok := prop["items"].(map[string]any); ok {
+				if t, ok := items["type"].(string); ok {
+					itemType = t
+				}
+			}
+
+			// Parse item value
+			itemVal, err := parseValue(itemType, value)
 			if err != nil {
-				return nil, fmt.Errorf("flag --%s requires an integer value: %w", name, err)
+				return nil, fmt.Errorf("flag --%s invalid item value: %w", name, err)
 			}
-			result[name] = intVal
-		case "number":
-			floatVal, err := strconv.ParseFloat(value, 64)
+			
+			// Append to existing slice
+			if list, ok := result[name].([]any); ok {
+				result[name] = append(list, itemVal)
+			} else {
+				// Should not happen if logic is correct
+				result[name] = []any{itemVal}
+			}
+
+		} else {
+			// Scalar types
+			val, err := parseValue(propType, value)
 			if err != nil {
-				return nil, fmt.Errorf("flag --%s requires a number value: %w", name, err)
+				return nil, fmt.Errorf("flag --%s error: %w", name, err)
 			}
-			result[name] = floatVal
-		case "boolean":
-			boolVal, err := strconv.ParseBool(value)
-			if err != nil {
-				return nil, fmt.Errorf("flag --%s requires a boolean value: %w", name, err)
+			result[name] = val
+		}
+	}
+
+	// Apply defaults for missing flags
+	for name, propVal := range tool.InputSchema.Properties {
+		if _, exists := result[name]; !exists {
+			if prop, ok := propVal.(map[string]any); ok {
+				if def, ok := prop["default"]; ok && def != nil {
+					result[name] = def
+				}
 			}
-			result[name] = boolVal
-		case "object", "array":
-			var jsonVal interface{}
-			if err := json.Unmarshal([]byte(value), &jsonVal); err != nil {
-				return nil, fmt.Errorf("flag --%s requires valid JSON: %w", name, err)
-			}
-			result[name] = jsonVal
-		default:
-			result[name] = value
 		}
 	}
 
@@ -361,7 +283,7 @@ func parseToolFlags(args []string, tool Tool) (map[string]interface{}, error) {
 	return result, nil
 }
 
-func findTool(tools []Tool, name string) *Tool {
+func findTool(tools []mcp.Tool, name string) *mcp.Tool {
 	for _, tool := range tools {
 		if tool.Name == name {
 			return &tool
@@ -370,15 +292,8 @@ func findTool(tools []Tool, name string) *Tool {
 	return nil
 }
 
-// MCP tool result types
-type ToolResult struct {
-	Content []ContentItem `json:"content"`
-	IsError bool          `json:"isError,omitempty"`
-}
-
-type ContentItem struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+func isHTTPURL(s string) bool {
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
 }
 
 func main() {
@@ -407,35 +322,60 @@ func main() {
 	toolArgs := args[separatorIdx+1:]
 
 	if len(serverArgs) == 0 {
-		fmt.Fprintln(os.Stderr, "Error: MCP server command is required")
+		fmt.Fprintln(os.Stderr, "Error: MCP server command or URL is required")
 		printUsage(os.Args[0])
 		os.Exit(1)
 	}
 
-	serverCmd := serverArgs[0]
-	serverCmdArgs := serverArgs[1:]
+	ctx := context.Background()
+	var mcpClient client.MCPClient
+	var err error
 
-	// Start MCP client
-	client, err := NewMCPClient(serverCmd, serverCmdArgs)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error starting MCP server: %v\n", err)
-		os.Exit(1)
+	if isHTTPURL(serverArgs[0]) {
+
+		if len(serverArgs) > 1 {
+			fmt.Fprintln(os.Stderr, "Error: HTTP URL mode does not accept additional server arguments")
+			os.Exit(1)
+		}
+
+		// For SSE client
+		mcpClient, err = client.NewSSEMCPClient(serverArgs[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating SSE client: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		mcpClient, err = client.NewStdioMCPClient(serverArgs[0], nil, serverArgs[1:]...)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error starting MCP server: %v\n", err)
+			os.Exit(1)
+		}
 	}
-	defer client.Close()
+
+	defer mcpClient.Close()
 
 	// Initialize
-	if err := client.Initialize(); err != nil {
+	initReq := mcp.InitializeRequest{}
+	initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initReq.Params.ClientInfo = mcp.Implementation{
+		Name:    "mcp-to-command",
+		Version: "1.0.0",
+	}
+
+	if _, err := mcpClient.Initialize(ctx, initReq); err != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing MCP connection: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Get tools list
-	tools, err := client.ListTools()
+	listReq := mcp.ListToolsRequest{}
+	toolsResult, err := mcpClient.ListTools(ctx, listReq)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error listing tools: %v\n", err)
 		os.Exit(1)
 	}
 
+	tools := toolsResult.Tools
 	// No tool specified or --help: show tools list
 	if len(toolArgs) == 0 || (len(toolArgs) == 1 && toolArgs[0] == "--help") {
 		printToolsHelp(tools)
@@ -467,39 +407,48 @@ func main() {
 		os.Exit(1)
 	}
 
-	result, err := client.CallTool(toolName, arguments)
+	callReq := mcp.CallToolRequest{}
+	callReq.Params.Name = toolName
+	callReq.Params.Arguments = arguments
+	result, err := mcpClient.CallTool(ctx, callReq)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error calling tool: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Try to parse as ToolResult and extract text content
-	var toolResult ToolResult
-	if err := json.Unmarshal(result, &toolResult); err == nil && len(toolResult.Content) > 0 {
-		// Output each text content item
-		for _, item := range toolResult.Content {
-			if item.Type == "text" && item.Text != "" {
-				// Try to pretty-print if it's JSON
-				var jsonData interface{}
-				if err := json.Unmarshal([]byte(item.Text), &jsonData); err == nil {
-					pretty, _ := json.MarshalIndent(jsonData, "", "  ")
-					fmt.Println(string(pretty))
-				} else {
-					fmt.Println(item.Text)
-				}
+	// Handle Result
+	if result.IsError {
+		// Print error content
+		for _, content := range result.Content {
+			if textContent, ok := content.(mcp.TextContent); ok {
+				fmt.Fprintln(os.Stderr, textContent.Text)
 			}
 		}
-		if toolResult.IsError {
-			os.Exit(1)
-		}
-	} else {
-		// Fallback: pretty print raw result
-		var prettyResult interface{}
-		if err := json.Unmarshal(result, &prettyResult); err != nil {
-			fmt.Println(string(result))
-		} else {
-			output, _ := json.MarshalIndent(prettyResult, "", "  ")
-			fmt.Println(string(output))
+		os.Exit(1)
+	}
+
+	// Print content
+	for _, content := range result.Content {
+		if textContent, ok := content.(mcp.TextContent); ok {
+			// Try to pretty-print if it's JSON
+			var jsonData any
+			if err := json.Unmarshal([]byte(textContent.Text), &jsonData); err == nil {
+				pretty, _ := json.MarshalIndent(jsonData, "", "  ")
+				fmt.Println(string(pretty))
+			} else {
+				fmt.Println(textContent.Text)
+			}
+		} else if imageContent, ok := content.(mcp.ImageContent); ok {
+			fmt.Printf("[Image: %s (mime: %s)]\n", imageContent.Data, imageContent.MIMEType)
+		} else if embeddedResource, ok := content.(mcp.EmbeddedResource); ok {
+			var uri string
+			switch res := embeddedResource.Resource.(type) {
+			case mcp.TextResourceContents:
+				uri = res.URI
+			case mcp.BlobResourceContents:
+				uri = res.URI
+			}
+			fmt.Printf("[Resource: %s]\n", uri)
 		}
 	}
 }

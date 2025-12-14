@@ -5,7 +5,7 @@ Turn any MCP server into a CLI tool. Automatically generates commands, flags, an
 ## Installation
 
 ```bash
-go install github.com/yourusername/mcp-to-command@latest
+go install github.com/simonfxr/mcp-to-command@latest
 ```
 
 Or build from source:
@@ -93,14 +93,29 @@ mcp-to-command go-jenkins-mcp -url example.com -auth user:pw -- jenkins_start_jo
 
 ### Type Mapping
 
-| JSON Schema Type | CLI Input | Example |
-|------------------|-----------|---------|
-| `string` | `--flag=value` | `--name=my-job` |
-| `integer` | `--flag=123` | `--build_number=42` |
-| `number` | `--flag=3.14` | `--threshold=0.5` |
-| `boolean` | `--flag=true` | `--verbose=true` |
-| `object` | `--flag='{"k":"v"}'` | `--parameters='{"BRANCH":"main"}'` |
-| `array` | `--flag='["a","b"]'` | `--tags='["prod","api"]'` |
+| JSON Schema Type | CLI Input                                  | Example                            |
+|------------------|--------------------------------------------|------------------------------------|
+| `string`         | `--flag=value`                             | `--name=my-job`                    |
+| `integer`        | `--flag=123`                               | `--build_number=42`                |
+| `number`         | `--flag=3.14`                              | `--threshold=0.5`                  |
+| `boolean`        | `--flag`, `--no-flag`, `--flag=true/false` | `--verbose`, `--no-dry-run`        |
+| `object`         | `--flag='{"k":"v"}'`                       | `--parameters='{"BRANCH":"main"}'` |
+| `array`          | `--flag=item1 --flag=item2`                | `--tags=prod --tags=api`           |
+
+### Flag Parsing Details
+
+**Boolean Flags:**
+- `--flag` sets the boolean property to `true`.
+- `--no-flag` sets the boolean property to `false`.
+- `--flag=true` and `--flag=false` are also supported.
+
+**Array Flags:**
+- You can provide values for `array` types by repeating the flag.
+- Example: `--users=alice --users=bob` becomes `["alice", "bob"]`.
+- The items are parsed according to the array's `items` type definition (e.g., array of integers).
+
+**Object/JSON Flags:**
+- Complex objects or arrays can also be passed as a single JSON string.
 
 ### Required vs Optional
 
