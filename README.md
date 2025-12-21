@@ -17,7 +17,7 @@ go build -o mcp-to-command .
 ## Usage
 
 ```
-mcp-to-command <server-cmd> [server-args...] -- <tool-name> [--flag=value...]
+mcp-to-command <server-cmd> [server-args...] -- <tool-name> [--flag value | --flag=value ...]
 ```
 
 The `--` separator divides MCP server arguments from tool arguments.
@@ -95,12 +95,12 @@ mcp-to-command go-jenkins-mcp -url example.com -auth user:pw -- jenkins_start_jo
 
 | JSON Schema Type | CLI Input                                  | Example                            |
 |------------------|--------------------------------------------|------------------------------------|
-| `string`         | `--flag=value`                             | `--name=my-job`                    |
-| `integer`        | `--flag=123`                               | `--build_number=42`                |
-| `number`         | `--flag=3.14`                              | `--threshold=0.5`                  |
+| `string`         | `--flag value` or `--flag=value`           | `--name my-job`                    |
+| `integer`        | `--flag 123` or `--flag=123`               | `--build_number 42`                |
+| `number`         | `--flag 3.14` or `--flag=3.14`             | `--threshold 0.5`                  |
 | `boolean`        | `--flag`, `--no-flag`, `--flag=true/false` | `--verbose`, `--no-dry-run`        |
-| `object`         | `--flag='{"k":"v"}'`                       | `--parameters='{"BRANCH":"main"}'` |
-| `array`          | `--flag=item1 --flag=item2`                | `--tags=prod --tags=api`           |
+| `object`         | `--flag '{"k":"v"}'`                       | `--parameters '{"BRANCH":"main"}'` |
+| `array`          | `--flag a --flag b` (repeatable)           | `--tags prod --tags api`           |
 
 ### Flag Parsing Details
 
@@ -110,8 +110,8 @@ mcp-to-command go-jenkins-mcp -url example.com -auth user:pw -- jenkins_start_jo
 - `--flag=true` and `--flag=false` are also supported.
 
 **Array Flags:**
-- You can provide values for `array` types by repeating the flag.
-- Example: `--users=alice --users=bob` becomes `["alice", "bob"]`.
+- Provide values for `array` types by repeating the flag.
+- Example: `--users alice --users bob` becomes `["alice", "bob"]`.
 - The items are parsed according to the array's `items` type definition (e.g., array of integers).
 
 **Object/JSON Flags:**

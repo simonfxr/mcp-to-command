@@ -117,16 +117,17 @@ func printToolHelp(tool mcp.Tool) {
 			defaultStr = fmt.Sprintf(" (default: %v)", def)
 		}
 
-		fmt.Printf("  %s <%s>%s%s\n", flagName, typeStr, reqStr, defaultStr)
+		switch typeStr {
+		case "boolean":
+			fmt.Printf("  %s[=<value>], --no-%s%s%s\n", flagName, name, reqStr, defaultStr)
+		case "array":
+			fmt.Printf("  %s <value> (repeatable)%s%s\n", flagName, reqStr, defaultStr)
+		default:
+			fmt.Printf("  %s <value>%s%s\n", flagName, reqStr, defaultStr)
+		}
 
 		if desc, ok := propVal["description"].(string); ok && desc != "" {
 			fmt.Printf("      %s\n", desc)
-		}
-		if typeStr == "object" {
-			fmt.Printf("      Example: %s='{\"key\":\"value\"}'\n", flagName)
-		}
-		if typeStr == "array" {
-			fmt.Printf("      Example: %s='[\"item1\",\"item2\"]'\n", flagName)
 		}
 	}
 }
@@ -137,7 +138,8 @@ func parseToolFlags(args []string, tool mcp.Tool) (map[string]any, error) {
 	result := make(map[string]any)
 
 	// Parse flags
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if !strings.HasPrefix(arg, "--") {
 			return nil, fmt.Errorf("unexpected argument: %s (flags must start with --)", arg)
 		}
@@ -156,9 +158,8 @@ func parseToolFlags(args []string, tool mcp.Tool) (map[string]any, error) {
 			hasValue = false
 		}
 
+		// Resolve flag name (handle --no-prefix)
 		propVal, exists := tool.InputSchema.Properties[name]
-
-		// Check for --no-flagname if flag not found
 		var isNegated bool
 		if !exists && strings.HasPrefix(name, "no-") {
 			candidate := strings.TrimPrefix(name, "no-")
@@ -180,6 +181,15 @@ func parseToolFlags(args []string, tool mcp.Tool) (map[string]any, error) {
 		}
 
 		propType, _ := prop["type"].(string)
+
+		// For non-boolean types, consume next arg as value if no = was used
+		if !hasValue && propType != "boolean" {
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+				value = args[i+1]
+				hasValue = true
+				i++
+			}
+		}
 
 		// Handle boolean shorthand (no value provided)
 		if !hasValue {
