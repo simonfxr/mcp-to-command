@@ -36,7 +36,7 @@
 
             subPackages = [ "." ];
 
-            vendorHash = "sha256-/TvbPAFzS0klOJAwxSRIzllylHYlwItF2gUn0pTwjY8=";
+            vendorHash = "sha256-nS4VyQLoQ7QU+8sYolBVgKHVNSmyhXwkzdUO7yHjsCg=";
 
             ldflags = [
               "-s"
