@@ -8,6 +8,13 @@ Turn any MCP server into a CLI tool. Automatically generates commands, flags, an
 go install github.com/simonfxr/mcp-to-command@latest
 ```
 
+With Nix:
+
+```bash
+nix run github:simonfxr/mcp-to-command -- <server-cmd> [server-args...] -- <tool-name> ...
+nix profile install github:simonfxr/mcp-to-command
+```
+
 Or build from source:
 
 ```bash
@@ -18,9 +25,14 @@ go build -o mcp-to-command .
 
 ```
 mcp-to-command <server-cmd> [server-args...] -- <tool-name> [--flag value | --flag=value ...]
+mcp-to-command <http(s)://server-url> -- <tool-name> [--flag value | --flag=value ...]
 ```
 
 The `--` separator divides MCP server arguments from tool arguments.
+
+Local servers are started as a subprocess and spoken to over stdio. Remote
+servers are reached via the Streamable HTTP transport; URLs whose path ends in
+`/sse` use the legacy SSE transport instead.
 
 ### List Available Tools
 
@@ -85,11 +97,12 @@ mcp-to-command go-jenkins-mcp -url example.com -auth user:pw -- jenkins_start_jo
 
 ## How It Works
 
-1. Starts the MCP server as a subprocess
+1. Starts the MCP server as a subprocess (or connects to it over HTTP)
 2. Initializes the MCP connection and fetches the tool list
 3. Generates CLI flags from each tool's JSON Schema (`inputSchema`)
 4. Parses user-provided flags and converts types
-5. Calls the requested tool and outputs the result as JSON
+5. Calls the requested tool and prints the result (JSON text is pretty-printed);
+   tool errors are written to stderr with a non-zero exit code
 
 ### Type Mapping
 
@@ -115,7 +128,10 @@ mcp-to-command go-jenkins-mcp -url example.com -auth user:pw -- jenkins_start_jo
 - The items are parsed according to the array's `items` type definition (e.g., array of integers).
 
 **Object/JSON Flags:**
-- Complex objects or arrays can also be passed as a single JSON string.
+- `object` properties (and array items of type `object`) are passed as a JSON string.
+
+**Nullable Types:**
+- Union types such as `["string", "null"]` use the first non-null type.
 
 ### Required vs Optional
 

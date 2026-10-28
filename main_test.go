@@ -121,6 +121,60 @@ func TestParseToolFlags(t *testing.T) {
 			tool:    makeTool(map[string]any{"foo": map[string]any{"type": "string"}}, nil),
 			wantErr: true,
 		},
+		{
+			name:    "negated non-boolean",
+			args:    []string{"--no-foo"},
+			tool:    makeTool(map[string]any{"foo": map[string]any{"type": "string"}}, nil),
+			wantErr: true,
+		},
+		{
+			name:    "negated with value",
+			args:    []string{"--no-verbose=true"},
+			tool:    makeTool(map[string]any{"verbose": map[string]any{"type": "boolean"}}, nil),
+			wantErr: true,
+		},
+		{
+			name: "property literally named no-x",
+			args: []string{"--no-cache=yes"},
+			tool: makeTool(map[string]any{"no-cache": map[string]any{"type": "string"}}, nil),
+			want: map[string]any{"no-cache": "yes"},
+		},
+		{
+			name:    "missing value",
+			args:    []string{"--foo"},
+			tool:    makeTool(map[string]any{"foo": map[string]any{"type": "string"}}, nil),
+			wantErr: true,
+		},
+		{
+			name: "nullable union type",
+			args: []string{"--num=7"},
+			tool: makeTool(map[string]any{"num": map[string]any{"type": []any{"null", "integer"}}}, nil),
+			want: map[string]any{"num": int64(7)},
+		},
+		{
+			name: "array of integers",
+			args: []string{"--ids=1", "--ids", "2"},
+			tool: makeTool(map[string]any{"ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}}, nil),
+			want: map[string]any{"ids": []any{int64(1), int64(2)}},
+		},
+		{
+			name: "object as JSON",
+			args: []string{`--params={"a":1}`},
+			tool: makeTool(map[string]any{"params": map[string]any{"type": "object"}}, nil),
+			want: map[string]any{"params": map[string]any{"a": float64(1)}},
+		},
+		{
+			name:    "invalid integer",
+			args:    []string{"--num=abc"},
+			tool:    makeTool(map[string]any{"num": map[string]any{"type": "integer"}}, nil),
+			wantErr: true,
+		},
+		{
+			name:    "positional argument",
+			args:    []string{"foo"},
+			tool:    makeTool(map[string]any{"foo": map[string]any{"type": "string"}}, nil),
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -134,5 +188,25 @@ func TestParseToolFlags(t *testing.T) {
 				t.Errorf("parseToolFlags() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		in   string
+		max  int
+		want string
+	}{
+		{"short", 10, "short"},
+		{"exactly ten", 11, "exactly ten"},
+		{"this is too long", 10, "this is..."},
+		{"first line\nsecond line", 60, "first line..."},
+		{"first line.\nsecond line", 60, "first line..."},
+		{"äöüäöüäöüäöü", 8, "äöüäö..."},
+	}
+	for _, tt := range tests {
+		if got := truncate(tt.in, tt.max); got != tt.want {
+			t.Errorf("truncate(%q, %d) = %q, want %q", tt.in, tt.max, got, tt.want)
+		}
 	}
 }

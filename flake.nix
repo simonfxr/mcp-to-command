@@ -17,6 +17,7 @@
       let
         pkgs = import nixpkgs { inherit system; };
         pname = "mcp-to-command";
+        version = "0.1.0" + (if self ? shortRev then "+${self.shortRev}" else "");
         fs = pkgs.lib.fileset;
         src = fs.toSource {
           root = ./.;
@@ -29,18 +30,17 @@
       in
       rec {
         packages = rec {
-          mcp-to-command = pkgs.buildGoModule {
-            inherit pname;
-            version = "0.0.0" + (if self ? shortRev then "+${self.shortRev}" else "");
-            inherit src;
+          mcp-to-command = pkgs.buildGo127Module {
+            inherit pname version src;
 
             subPackages = [ "." ];
 
-            vendorHash = "sha256-nS4VyQLoQ7QU+8sYolBVgKHVNSmyhXwkzdUO7yHjsCg=";
+            vendorHash = "sha256-36nWZqUptizcLTGddXwf81V0tJ7uXs1ky2+sM+FVH98=";
 
             ldflags = [
               "-s"
               "-w"
+              "-X main.version=${version}"
             ];
 
             meta.mainProgram = pname;
@@ -55,15 +55,15 @@
 
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            go
+            go_1_27
             gopls
             gotools
-            go-tools
+            (go-tools.override { buildGoModule = buildGo127Module; })
             delve
           ];
         };
 
-        formatter = pkgs.nixfmt-rfc-style;
+        formatter = pkgs.nixfmt;
       }
     );
 }
