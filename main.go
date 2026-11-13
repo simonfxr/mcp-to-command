@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"net/url"
 	"os"
 	"os/signal"
@@ -150,11 +153,16 @@ func printToolHelp(tool mcp.Tool) {
 		}
 
 		var suffix string
-		if required[name] {
+		def, hasDefault := prop["default"]
+		if required[name] && !hasDefault {
 			suffix += " (required)"
 		}
-		if def, ok := prop["default"]; ok && def != nil {
-			suffix += fmt.Sprintf(" (default: %v)", def)
+		if hasDefault {
+			if def == nil {
+				suffix += " (default: null)"
+			} else {
+				suffix += fmt.Sprintf(" (default: %v)", def)
+			}
 		}
 
 		switch typ := schemaType(prop); typ {
@@ -178,13 +186,28 @@ func parseValue(typ, s string) (any, error) {
 	case "integer":
 		return strconv.ParseInt(s, 10, 64)
 	case "number":
-		return strconv.ParseFloat(s, 64)
+		v, err := strconv.ParseFloat(s, 64)
+		if err == nil && (math.IsNaN(v) || math.IsInf(v, 0)) {
+			return nil, fmt.Errorf("requires a finite number")
+		}
+		return v, err
 	case "boolean":
 		return strconv.ParseBool(s)
 	case "object", "array":
 		var v any
-		if err := json.Unmarshal([]byte(s), &v); err != nil {
+		decoder := json.NewDecoder(strings.NewReader(s))
+		decoder.UseNumber()
+		if err := decoder.Decode(&v); err != nil {
 			return nil, fmt.Errorf("requires valid JSON: %w", err)
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return nil, fmt.Errorf("requires a single JSON value")
+		}
+		if _, ok := v.(map[string]any); typ == "object" && !ok {
+			return nil, fmt.Errorf("requires a JSON object")
+		}
+		if _, ok := v.([]any); typ == "array" && !ok {
+			return nil, fmt.Errorf("requires a JSON array")
 		}
 		return v, nil
 	default:
@@ -272,7 +295,7 @@ func parseToolFlags(args []string, tool mcp.Tool) (map[string]any, error) {
 			continue
 		}
 		if prop, ok := raw.(map[string]any); ok {
-			if def, ok := prop["default"]; ok && def != nil {
+			if def, ok := prop["default"]; ok {
 				result[name] = def
 			}
 		}
@@ -368,9 +391,9 @@ func printResult(result *mcp.CallToolResult) {
 		switch c := content.(type) {
 		case mcp.TextContent:
 			// Pretty-print JSON payloads, pass everything else through.
-			var data any
-			if err := json.Unmarshal([]byte(c.Text), &data); err == nil {
-				printJSON(data)
+			var pretty bytes.Buffer
+			if err := json.Indent(&pretty, []byte(strings.TrimSpace(c.Text)), "", "  "); err == nil {
+				fmt.Println(pretty.String())
 			} else {
 				fmt.Println(c.Text)
 			}

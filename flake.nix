@@ -35,7 +35,7 @@
 
             subPackages = [ "." ];
 
-            vendorHash = "sha256-36nWZqUptizcLTGddXwf81V0tJ7uXs1ky2+sM+FVH98=";
+            vendorHash = "sha256-kxvX/VJbjkYxoNEldmMJM0+dYozUgLVC/t99ZSbLGSA=";
 
             ldflags = [
               "-s"
@@ -49,7 +49,9 @@
           default = mcp-to-command;
         };
 
-        apps.default = flake-utils.lib.mkApp { drv = packages.default; };
+        apps.default = (flake-utils.lib.mkApp { drv = packages.default; }) // {
+          meta.description = "Run MCP server tools from the command line";
+        };
 
         checks.default = packages.default;
 
