@@ -318,10 +318,11 @@ func TestPrintResult(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := captureStdout(t, func() {
-				printResult(mcp.NewToolResultText(tt.text))
+				p := resultPrinter{out: os.Stdout, warn: os.Stderr}
+				p.print(t.Context(), mcp.NewToolResultText(tt.text))
 			})
 			if got != tt.want {
-				t.Fatalf("printResult() = %q, want %q", got, tt.want)
+				t.Fatalf("print() = %q, want %q", got, tt.want)
 			}
 		})
 	}

@@ -104,6 +104,36 @@ mcp-to-command go-jenkins-mcp -url example.com -auth user:pw -- jenkins_start_jo
 5. Calls the requested tool and prints the result (JSON text is pretty-printed);
    tool errors are written to stderr with a non-zero exit code
 
+### Tool Output
+
+Stdout only ever receives text. Binary content is saved to a file and
+referenced by its path:
+
+| Content                  | Output                                                    |
+|--------------------------|-----------------------------------------------------------|
+| Text                     | printed as is, JSON is pretty-printed                     |
+| Image / audio            | `[Image: image/png, 48213 bytes] /tmp/mcp-to-command-1234.png` |
+| Embedded text resource   | `[Resource: <uri> (<mime>)]` followed by the text         |
+| Embedded binary resource | `[Resource: <uri> (<mime>, 512 bytes)] /tmp/mcp-to-command-5678.pdf` |
+| Resource link            | read from the server and printed like an embedded resource |
+
+**Saved files:**
+- Files are written to the system temp directory, or to the directory named by
+  `MCP_TO_COMMAND_OUTPUT_DIR` (created if missing).
+- They are never deleted by `mcp-to-command`; cleaning up is up to the caller.
+- The extension is derived from the MIME type, then from the resource URI, and
+  is `.bin` otherwise.
+- If a payload cannot be decoded or saved, a warning goes to stderr and a
+  placeholder such as `[Image: image/png, 64284 bytes base64]` is printed.
+
+**Resource links:**
+- Links are resolved with `resources/read` while the connection is still open,
+  if the server advertises the `resources` capability.
+- If that is not possible, the link itself is printed, with a warning on stderr
+  if the read failed:
+  `[Resource link: <uri> (<title>, <mime>, <size> bytes)]` followed by its
+  description.
+
 ### Type Mapping
 
 | JSON Schema Type | CLI Input                                  | Example                            |

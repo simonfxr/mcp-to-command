@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -372,46 +371,13 @@ func connect(ctx context.Context, serverArgs []string) (*client.Client, error) {
 	return c, nil
 }
 
-func printJSON(v any) {
+func printJSON(w io.Writer, v any) {
 	pretty, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		fmt.Printf("%v\n", v)
+		fmt.Fprintf(w, "%v\n", v)
 		return
 	}
-	fmt.Println(string(pretty))
-}
-
-func printResult(result *mcp.CallToolResult) {
-	if len(result.Content) == 0 && result.StructuredContent != nil {
-		printJSON(result.StructuredContent)
-		return
-	}
-
-	for _, content := range result.Content {
-		switch c := content.(type) {
-		case mcp.TextContent:
-			// Pretty-print JSON payloads, pass everything else through.
-			var pretty bytes.Buffer
-			if err := json.Indent(&pretty, []byte(strings.TrimSpace(c.Text)), "", "  "); err == nil {
-				fmt.Println(pretty.String())
-			} else {
-				fmt.Println(c.Text)
-			}
-		case mcp.ImageContent:
-			fmt.Printf("[Image: %s, %d bytes base64]\n", c.MIMEType, len(c.Data))
-		case mcp.AudioContent:
-			fmt.Printf("[Audio: %s, %d bytes base64]\n", c.MIMEType, len(c.Data))
-		case mcp.ResourceLink:
-			fmt.Printf("[Resource link: %s]\n", c.URI)
-		case mcp.EmbeddedResource:
-			switch res := c.Resource.(type) {
-			case mcp.TextResourceContents:
-				fmt.Printf("[Resource: %s]\n%s\n", res.URI, res.Text)
-			case mcp.BlobResourceContents:
-				fmt.Printf("[Resource: %s (%s, %d bytes base64)]\n", res.URI, res.MIMEType, len(res.Blob))
-			}
-		}
-	}
+	fmt.Fprintln(w, string(pretty))
 }
 
 func run(args []string) int {
@@ -493,16 +459,18 @@ func run(args []string) int {
 		return 1
 	}
 
+	printer := resultPrinter{out: os.Stdout, warn: os.Stderr}
+	if mcpClient.GetServerCapabilities().Resources != nil {
+		printer.resources = mcpClient
+	}
+
 	if result.IsError {
-		for _, content := range result.Content {
-			if text, ok := content.(mcp.TextContent); ok {
-				fmt.Fprintln(os.Stderr, text.Text)
-			}
-		}
+		printer.out = os.Stderr
+		printer.print(ctx, result)
 		return 1
 	}
 
-	printResult(result)
+	printer.print(ctx, result)
 	return 0
 }
 
